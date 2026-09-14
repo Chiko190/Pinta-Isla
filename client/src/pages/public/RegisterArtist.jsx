@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { registerArtist } from "../../api/auth";
+import { useAuth } from "../../context/AuthContext";
 import Button from "../../components/ui/Button";
 import { Field, Input, TextArea, Select } from "../../components/ui/Field";
 import PasswordStrength from "../../components/ui/PasswordStrength";
 import { SingleImagePicker, MultiImagePicker } from "../../components/ui/ImagePicker";
+import GoogleSignInButton from "../../components/auth/GoogleSignInButton";
 
 const STEPS = ["Personal Info", "Artist Info", "Portfolio", "Agreement"];
 
@@ -18,8 +20,15 @@ const initial = {
 
 export default function RegisterArtist() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { loginWithToken, homeFor } = useAuth();
+  const [googlePrefill, setGooglePrefill] = useState(location.state?.googlePrefill || null);
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState(initial);
+  const [form, setForm] = useState(() =>
+    googlePrefill
+      ? { ...initial, firstName: googlePrefill.firstName || "", lastName: googlePrefill.lastName || "", email: googlePrefill.email || "" }
+      : initial
+  );
   const [avatar, setAvatar] = useState(null);
   const [portfolio, setPortfolio] = useState([]);
   const [portfolioMeta, setPortfolioMeta] = useState([]);
@@ -44,14 +53,30 @@ export default function RegisterArtist() {
 
   function validateStep() {
     if (step === 0) {
-      if (!form.firstName || !form.lastName || !form.username || !form.email || !form.password) {
+      if (!form.firstName || !form.lastName || !form.username || !form.email) {
         return "Please fill in all required personal information.";
       }
-      if (form.password.length < 8) return "Password must be at least 8 characters.";
-      if (form.password !== form.confirmPassword) return "Passwords do not match.";
+      if (!googlePrefill) {
+        if (!form.password) return "Please fill in all required personal information.";
+        if (form.password.length < 8) return "Password must be at least 8 characters.";
+        if (form.password !== form.confirmPassword) return "Passwords do not match.";
+      }
     }
     if (step === 1 && !form.artistName) return "Artist name is required.";
     return null;
+  }
+
+  function handleGooglePrefill(profile, credential) {
+    setError(null);
+    setGooglePrefill({ ...profile, credential });
+    setForm((f) => ({ ...f, firstName: profile.firstName || "", lastName: profile.lastName || "", email: profile.email || "" }));
+  }
+
+  // Only reached if the Google account already belongs to an existing user
+  // (any role) — nothing left to apply for, just log them in.
+  function handleGoogleExistingAccount(token, user) {
+    loginWithToken(token, user);
+    navigate(homeFor(user.role), { replace: true });
   }
 
   function next() {
@@ -72,9 +97,11 @@ export default function RegisterArtist() {
     setLoading(true);
     try {
       const fd = new FormData();
-      ["firstName", "lastName", "username", "email", "password", "confirmPassword", "phone", "location",
-        "artistName", "bio", "statement", "specialization", "style", "medium", "yearsExperience", "intro"]
-        .forEach((k) => fd.append(k, form[k]));
+      const fields = ["firstName", "lastName", "username", "email", "phone", "location",
+        "artistName", "bio", "statement", "specialization", "style", "medium", "yearsExperience", "intro"];
+      if (!googlePrefill) fields.push("password", "confirmPassword");
+      fields.forEach((k) => fd.append(k, form[k]));
+      if (googlePrefill) fd.append("googleCredential", googlePrefill.credential);
       fd.append("agreeToTerms", "true");
       fd.append("agreeArtistTerms", "true");
       fd.append("socialLinks", JSON.stringify({
@@ -111,6 +138,24 @@ export default function RegisterArtist() {
       <h1 className="font-display text-2xl font-bold text-ink-950">Apply as an Artist</h1>
       <p className="mt-1 text-sm text-ink-950/55">Your application will be reviewed by an administrator before your dashboard is activated.</p>
 
+      {step === 0 && !googlePrefill && Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID) && (
+        <>
+          <div className="mt-7">
+            <GoogleSignInButton
+              role="artist"
+              onSuccess={handleGoogleExistingAccount}
+              onNeedsArtistApplication={handleGooglePrefill}
+              onError={setError}
+            />
+          </div>
+          <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-ink-950/40">
+            <div className="h-px flex-1 bg-ink-950/10" />
+            Or fill in the form
+            <div className="h-px flex-1 bg-ink-950/10" />
+          </div>
+        </>
+      )}
+
       <div className="mt-7 flex items-center gap-2">
         {STEPS.map((s, i) => (
           <div key={s} className="flex flex-1 items-center gap-2">
@@ -135,17 +180,27 @@ export default function RegisterArtist() {
               <Field label="Last Name" required><Input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
             </div>
             <Field label="Username" required><Input value={form.username} onChange={(e) => set("username", e.target.value)} /></Field>
-            <Field label="Email" required><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-            <Field label="Password" required>
-              <div className="relative">
-                <Input type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => set("password", e.target.value)} className="pr-16" />
-                <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-ink-700">
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-              <PasswordStrength password={form.password} />
+            <Field label="Email" required>
+              <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} disabled={Boolean(googlePrefill)} />
             </Field>
-            <Field label="Confirm Password" required><Input type={showPassword ? "text" : "password"} value={form.confirmPassword} onChange={(e) => set("confirmPassword", e.target.value)} /></Field>
+            {googlePrefill ? (
+              <p className="rounded-lg bg-accent-green/10 px-4 py-2.5 text-sm text-accent-green">
+                Signing up with Google — no password needed.
+              </p>
+            ) : (
+              <>
+                <Field label="Password" required>
+                  <div className="relative">
+                    <Input type={showPassword ? "text" : "password"} value={form.password} onChange={(e) => set("password", e.target.value)} className="pr-16" />
+                    <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-ink-700">
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <PasswordStrength password={form.password} />
+                </Field>
+                <Field label="Confirm Password" required><Input type={showPassword ? "text" : "password"} value={form.confirmPassword} onChange={(e) => set("confirmPassword", e.target.value)} /></Field>
+              </>
+            )}
             <Field label="Phone Number"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
             <Field label="Location"><Input placeholder="City, Province" value={form.location} onChange={(e) => set("location", e.target.value)} /></Field>
           </>

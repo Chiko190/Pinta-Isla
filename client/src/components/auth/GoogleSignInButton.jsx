@@ -6,7 +6,13 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 // Renders Google's own "Sign in with Google" button via the Google Identity
 // Services script (loaded in index.html). Handles both login and signup —
 // the backend finds-or-creates the account, so the caller just gets a token.
-export default function GoogleSignInButton({ onSuccess, onError }) {
+//
+// `role` tells the backend what to do with a BRAND NEW account: "customer"
+// creates it immediately, "artist" skips creation and calls
+// onNeedsArtistApplication instead (an artist account still needs the full
+// application), and omitting it lets the backend ask via onNeedsRoleChoice
+// (used by the Login page, where intent isn't known yet).
+export default function GoogleSignInButton({ role, onSuccess, onNeedsRoleChoice, onNeedsArtistApplication, onError }) {
   const buttonRef = useRef(null);
   const [scriptReady, setScriptReady] = useState(false);
 
@@ -24,8 +30,14 @@ export default function GoogleSignInButton({ onSuccess, onError }) {
         client_id: CLIENT_ID,
         callback: async (response) => {
           try {
-            const res = await googleAuth(response.credential);
-            onSuccess(res.data.token, res.data.user);
+            const res = await googleAuth(response.credential, role);
+            if (res.data.needsRoleChoice) {
+              onNeedsRoleChoice?.(res.data.profile, response.credential);
+            } else if (res.data.needsArtistApplication) {
+              onNeedsArtistApplication?.(res.data.profile, response.credential);
+            } else {
+              onSuccess(res.data.token, res.data.user);
+            }
           } catch (err) {
             onError?.(err.message);
           }
@@ -46,7 +58,7 @@ export default function GoogleSignInButton({ onSuccess, onError }) {
     return () => {
       cancelled = true;
     };
-  }, [onSuccess, onError]);
+  }, [role, onSuccess, onNeedsRoleChoice, onNeedsArtistApplication, onError]);
 
   if (!CLIENT_ID) return null;
 

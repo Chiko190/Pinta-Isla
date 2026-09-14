@@ -71,7 +71,7 @@ export default function RegisterCustomer() {
       {googleEnabled && (
         <>
           <div className="mt-7">
-            <GoogleSignInButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
+            <GoogleSignInButton role="customer" onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
           </div>
           <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-ink-950/40">
             <div className="h-px flex-1 bg-ink-950/10" />

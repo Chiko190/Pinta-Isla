@@ -46,7 +46,7 @@ const strongPasswordValidator = body("password")
     "Password must include at least 3 of: lowercase, uppercase, numbers, and symbols."
   );
 
-const baseAccountValidation = [
+const identityValidation = [
   body("firstName").trim().notEmpty().withMessage("First name is required."),
   body("lastName").trim().notEmpty().withMessage("Last name is required."),
   body("username")
@@ -54,15 +54,40 @@ const baseAccountValidation = [
     .isLength({ min: 3 })
     .withMessage("Username must be at least 3 characters."),
   body("email").trim().isEmail().withMessage("Please enter a valid email address."),
+  body("agreeToTerms")
+    .custom((v) => v === "true" || v === true)
+    .withMessage("You must agree to the Terms of Service and Privacy Policy."),
+];
+
+const passwordValidation = [
   strongPasswordValidator,
   body("confirmPassword").custom((value, { req }) => {
     if (value !== req.body.password) throw new Error("Passwords do not match.");
     return true;
   }),
-  body("agreeToTerms")
-    .custom((v) => v === "true" || v === true)
-    .withMessage("You must agree to the Terms of Service and Privacy Policy."),
 ];
+
+const baseAccountValidation = [...identityValidation, ...passwordValidation];
+
+// Shared by /google and the Google-assisted branch of /register/artist.
+// Throws { status, message } on any verification failure.
+async function verifyGoogleIdToken(credential) {
+  if (!googleClient) throw { status: 503, message: "Google Sign-In is not configured on this server yet." };
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    throw { status: 401, message: "Invalid Google credential." };
+  }
+  if (!payload.email_verified) {
+    throw { status: 403, message: "Your Google email address isn't verified." };
+  }
+  return payload;
+}
 
 async function assertUniqueAccount(username, email) {
   const existing = await User.findOne({
@@ -128,7 +153,7 @@ router.post(
     { name: "profileImage", maxCount: 1 },
     { name: "portfolioImages", maxCount: 8 },
   ]),
-  baseAccountValidation,
+  identityValidation,
   body("artistName").trim().notEmpty().withMessage("Artist name is required."),
   body("agreeArtistTerms")
     .custom((v) => v === "true" || v === true)
@@ -141,8 +166,8 @@ router.post(
         firstName,
         lastName,
         username,
-        email,
         password,
+        googleCredential,
         phone,
         location,
         artistName,
@@ -156,9 +181,31 @@ router.post(
         socialLinks,
         portfolioMeta,
       } = req.body;
+      let { email } = req.body;
+
+      // Two ways to prove account ownership: a password (validated here,
+      // manually, since the declarative validator above is skipped for the
+      // Google-assisted path) or a verified Google credential. Never both.
+      let passwordHash = null;
+      let googleId = null;
+      if (googleCredential) {
+        const payload = await verifyGoogleIdToken(googleCredential);
+        email = payload.email; // trust the verified token, not the form field
+        googleId = payload.sub;
+      } else {
+        if (!isStrongPassword(password)) {
+          return res.status(400).json({
+            message:
+              "Password must be at least 10 characters and include at least 3 of: lowercase, uppercase, numbers, and symbols.",
+          });
+        }
+        if (password !== req.body.confirmPassword) {
+          return res.status(400).json({ message: "Passwords do not match." });
+        }
+        passwordHash = await bcrypt.hash(password, 12);
+      }
 
       await assertUniqueAccount(username, email);
-      const passwordHash = await bcrypt.hash(password, 12);
 
       const user = await User.create(
         {
@@ -169,6 +216,8 @@ router.post(
           username,
           email,
           passwordHash,
+          authProvider: googleCredential ? "google" : "local",
+          googleId,
           phone,
           profileImage: upload.fileUrl(req.files?.profileImage?.[0]),
         },
@@ -386,33 +435,25 @@ router.post(
 );
 
 // ---------- Google Sign-In (login or registration, same flow) ----------
+// `role` distinguishes intent for a BRAND NEW account only (existing users
+// always just log in, regardless of what's passed):
+//   - "customer": create the account immediately (used by the customer
+//     registration page, where intent is unambiguous).
+//   - "artist": don't create anything — hand back the verified profile so
+//     the frontend can route into the artist application form, which still
+//     needs bio/portfolio/etc. before an account exists.
+//   - omitted: intent is unknown (the Login page's Google button) — respond
+//     with needsRoleChoice so the frontend can ask, then call this again
+//     with an explicit role.
 router.post(
   "/google",
   loginLimiter,
   body("credential").notEmpty().withMessage("Missing Google credential."),
   checkValidation,
   async (req, res, next) => {
-    if (!googleClient) {
-      return res.status(503).json({
-        message: "Google Sign-In is not configured on this server yet.",
-      });
-    }
-
     try {
-      let payload;
-      try {
-        const ticket = await googleClient.verifyIdToken({
-          idToken: req.body.credential,
-          audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        payload = ticket.getPayload();
-      } catch {
-        return res.status(401).json({ message: "Invalid Google credential." });
-      }
-
-      if (!payload.email_verified) {
-        return res.status(403).json({ message: "Your Google email address isn't verified." });
-      }
+      const payload = await verifyGoogleIdToken(req.body.credential);
+      const { role } = req.body;
 
       let user = await User.findOne({ where: { googleId: payload.sub } });
 
@@ -421,33 +462,47 @@ router.post(
         // this Google identity to it instead of creating a duplicate account.
         // Google having verified the email address is what makes this safe.
         user = await User.findOne({ where: { email: payload.email } });
-        if (user) {
-          if (!user.googleId) await user.update({ googleId: payload.sub });
-        } else {
-          const t = await sequelize.transaction();
-          try {
-            const username = await uniqueUsernameFromEmail(payload.email);
-            user = await User.create(
-              {
-                role: "customer",
-                status: "active",
-                firstName: payload.given_name || "New",
-                lastName: payload.family_name || "User",
-                username,
-                email: payload.email,
-                passwordHash: null,
-                authProvider: "google",
-                googleId: payload.sub,
-                profileImage: payload.picture || null,
-              },
-              { transaction: t }
-            );
-            await CustomerProfile.create({ userId: user.id }, { transaction: t });
-            await t.commit();
-          } catch (err) {
-            await t.rollback();
-            throw err;
-          }
+        if (user && !user.googleId) await user.update({ googleId: payload.sub });
+      }
+
+      if (!user) {
+        const profile = {
+          firstName: payload.given_name || "",
+          lastName: payload.family_name || "",
+          email: payload.email,
+          picture: payload.picture || null,
+        };
+
+        if (role === "artist") {
+          return res.json({ needsArtistApplication: true, profile });
+        }
+        if (role !== "customer") {
+          return res.json({ needsRoleChoice: true, profile });
+        }
+
+        const t = await sequelize.transaction();
+        try {
+          const username = await uniqueUsernameFromEmail(payload.email);
+          user = await User.create(
+            {
+              role: "customer",
+              status: "active",
+              firstName: profile.firstName || "New",
+              lastName: profile.lastName || "User",
+              username,
+              email: payload.email,
+              passwordHash: null,
+              authProvider: "google",
+              googleId: payload.sub,
+              profileImage: profile.picture,
+            },
+            { transaction: t }
+          );
+          await CustomerProfile.create({ userId: user.id }, { transaction: t });
+          await t.commit();
+        } catch (err) {
+          await t.rollback();
+          throw err;
         }
       }
 

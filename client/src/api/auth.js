@@ -9,7 +9,8 @@ export const registerArtist = (formData) =>
 export const login = (identifier, password) =>
   client.post("/auth/login", { identifier, password });
 
-export const googleAuth = (credential) => client.post("/auth/google", { credential });
+export const googleAuth = (credential, role) =>
+  client.post("/auth/google", role ? { credential, role } : { credential });
 
 export const forgotPassword = (email) => client.post("/auth/forgot-password", { email });
 

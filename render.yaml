@@ -1,0 +1,23 @@
+databases:
+  - name: pinta-isla-db
+    plan: free
+    databaseName: pintaisla
+    user: pintaisla
+
+services:
+  - type: web
+    name: pinta-isla-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pinta-isla-db
+          property: connectionString

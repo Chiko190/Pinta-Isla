@@ -1,0 +1,9 @@
+node_modules/
+data/*.sqlite
+.env
+
+# Runtime uploads are user-generated and (on free hosting) ephemeral — never commit them.
+# The seed-* images are demo assets baked into the repo so seeded data still renders after deploy.
+uploads/*
+!uploads/.gitkeep
+!uploads/seed-*.jpg

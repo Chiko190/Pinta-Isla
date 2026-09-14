@@ -15,19 +15,31 @@ const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
+// Render (and most PaaS hosts) sit behind a reverse proxy — without this,
+// Express sees the proxy's IP for every request, which breaks per-IP rate
+// limiting and req.secure checks.
+app.set("trust proxy", 1);
+
 // When the client is built into ../client/dist (Render's single-service deploy),
 // the API and the frontend are served from the same origin — no CORS needed for
 // that path. CLIENT_ORIGIN stays as a fallback for a split (Vercel) deployment.
 const clientDistPath = path.join(__dirname, "..", "..", "client", "dist");
 const servingClientBuild = fs.existsSync(clientDistPath);
 
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  })
+);
 if (!servingClientBuild) {
   app.use(cors({ origin: process.env.CLIENT_ORIGIN || "http://localhost:5173" }));
 }
 app.use(morgan("dev"));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body size caps: an upload-free JSON/urlencoded request has no legitimate
+// reason to be large — this blocks trivial payload-flood DoS attempts.
+app.use(express.json({ limit: "200kb" }));
+app.use(express.urlencoded({ extended: true, limit: "200kb" }));
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 

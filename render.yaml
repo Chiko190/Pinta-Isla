@@ -18,3 +18,10 @@ services:
         fromDatabase:
           name: pinta-isla-db
           property: connectionString
+      # Google Sign-In: both need the same OAuth Client ID (see README).
+      # VITE_GOOGLE_CLIENT_ID must be set BEFORE the build runs, since Vite
+      # bakes it into the built JS. Leave both blank to disable Google login.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false

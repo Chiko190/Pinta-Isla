@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { registerCustomer } from "../../api/auth";
 import { useAuth } from "../../context/AuthContext";
@@ -6,6 +6,7 @@ import Button from "../../components/ui/Button";
 import { Field, Input } from "../../components/ui/Field";
 import PasswordStrength from "../../components/ui/PasswordStrength";
 import { SingleImagePicker } from "../../components/ui/ImagePicker";
+import GoogleSignInButton from "../../components/auth/GoogleSignInButton";
 
 const initial = {
   firstName: "", lastName: "", username: "", email: "", password: "", confirmPassword: "",
@@ -25,6 +26,18 @@ export default function RegisterCustomer() {
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
   }
+
+  const handleGoogleSuccess = useCallback(
+    (token, user) => {
+      setError(null);
+      loginWithToken(token, user);
+      navigate(homeFor(user.role), { replace: true });
+    },
+    [loginWithToken, homeFor, navigate]
+  );
+
+  const handleGoogleError = useCallback((message) => setError(message), []);
+  const googleEnabled = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -55,7 +68,20 @@ export default function RegisterCustomer() {
       <h1 className="font-display text-2xl font-bold text-ink-950">Create your customer account</h1>
       <p className="mt-1 text-sm text-ink-950/55">Browse, collect, and commission original artwork.</p>
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+      {googleEnabled && (
+        <>
+          <div className="mt-7">
+            <GoogleSignInButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
+          </div>
+          <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-ink-950/40">
+            <div className="h-px flex-1 bg-ink-950/10" />
+            Or sign up with email
+            <div className="h-px flex-1 bg-ink-950/10" />
+          </div>
+        </>
+      )}
+
+      <form onSubmit={handleSubmit} className={googleEnabled ? "space-y-5" : "mt-8 space-y-5"}>
         <div className="flex items-center gap-5">
           <SingleImagePicker file={avatar} onChange={setAvatar} />
           <p className="text-xs text-ink-950/50">Optional profile picture. JPG, PNG, or WEBP, up to 5MB.</p>

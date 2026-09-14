@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { login } from "../../api/auth";
 import { useAuth } from "../../context/AuthContext";
 import Button from "../../components/ui/Button";
 import { Field, Input } from "../../components/ui/Field";
+import GoogleSignInButton from "../../components/auth/GoogleSignInButton";
 
 export default function Login() {
   const { loginWithToken, homeFor, sessionMessage, clearSessionMessage } = useAuth();
@@ -32,6 +33,19 @@ export default function Login() {
     }
   }
 
+  const handleGoogleSuccess = useCallback(
+    (token, user) => {
+      setError(null);
+      loginWithToken(token, user);
+      const dest = location.state?.from?.pathname || homeFor(user.role);
+      navigate(dest, { replace: true });
+    },
+    [loginWithToken, homeFor, navigate, location]
+  );
+
+  const handleGoogleError = useCallback((message) => setError(message), []);
+  const googleEnabled = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
+
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4 py-16">
       <h1 className="font-display text-2xl font-bold text-ink-950">Welcome back</h1>
@@ -44,7 +58,20 @@ export default function Login() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-7 space-y-4">
+      {googleEnabled && (
+        <>
+          <div className="mt-7">
+            <GoogleSignInButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
+          </div>
+          <div className="my-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-ink-950/40">
+            <div className="h-px flex-1 bg-ink-950/10" />
+            Or log in with email
+            <div className="h-px flex-1 bg-ink-950/10" />
+          </div>
+        </>
+      )}
+
+      <form onSubmit={handleSubmit} className={googleEnabled ? "space-y-4" : "mt-7 space-y-4"}>
         <Field label="Email or Username" required>
           <Input value={identifier} onChange={(e) => setIdentifier(e.target.value)} required autoFocus />
         </Field>

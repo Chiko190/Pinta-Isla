@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const { body } = require("express-validator");
 const { Op } = require("sequelize");
+const { OAuth2Client } = require("google-auth-library");
 
 const {
   sequelize,
@@ -14,11 +15,36 @@ const {
 } = require("../models");
 const { signToken, requireAuth } = require("../middleware/auth");
 const { checkValidation } = require("../middleware/errorHandler");
+const { loginLimiter, registerLimiter } = require("../middleware/rateLimit");
 const upload = require("../middleware/upload");
 const { nextDisplayId } = require("../utils/displayId");
 const { notifyAdmins } = require("../utils/notify");
 
 const router = express.Router();
+
+const googleClient = process.env.GOOGLE_CLIENT_ID
+  ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
+  : null;
+
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+// Requires 10+ chars and at least 3 of the 4 character classes — strong
+// enough to resist dictionary/credential-stuffing attacks without being an
+// unusable "must contain a hieroglyph" rule.
+function isStrongPassword(pw) {
+  if (typeof pw !== "string" || pw.length < 10) return false;
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((re) => re.test(pw)).length;
+  return classes >= 3;
+}
+
+const strongPasswordValidator = body("password")
+  .isLength({ min: 10 })
+  .withMessage("Password must be at least 10 characters.")
+  .custom((value) => isStrongPassword(value))
+  .withMessage(
+    "Password must include at least 3 of: lowercase, uppercase, numbers, and symbols."
+  );
 
 const baseAccountValidation = [
   body("firstName").trim().notEmpty().withMessage("First name is required."),
@@ -28,9 +54,7 @@ const baseAccountValidation = [
     .isLength({ min: 3 })
     .withMessage("Username must be at least 3 characters."),
   body("email").trim().isEmail().withMessage("Please enter a valid email address."),
-  body("password")
-    .isLength({ min: 8 })
-    .withMessage("Password must be at least 8 characters."),
+  strongPasswordValidator,
   body("confirmPassword").custom((value, { req }) => {
     if (value !== req.body.password) throw new Error("Passwords do not match.");
     return true;
@@ -53,6 +77,7 @@ async function assertUniqueAccount(username, email) {
 // ---------- Customer registration ----------
 router.post(
   "/register/customer",
+  registerLimiter,
   upload.single("profileImage"),
   baseAccountValidation,
   checkValidation,
@@ -98,6 +123,7 @@ router.post(
 // ---------- Artist registration ----------
 router.post(
   "/register/artist",
+  registerLimiter,
   upload.fields([
     { name: "profileImage", maxCount: 1 },
     { name: "portfolioImages", maxCount: 8 },
@@ -220,6 +246,7 @@ router.post(
 // ---------- Login ----------
 router.post(
   "/login",
+  loginLimiter,
   body("identifier").trim().notEmpty().withMessage("Email or username is required."),
   body("password").notEmpty().withMessage("Password is required."),
   checkValidation,
@@ -229,10 +256,40 @@ router.post(
       const user = await User.findOne({
         where: { [Op.or]: [{ email: identifier }, { username: identifier }] },
       });
-      if (!user) return res.status(401).json({ message: "Invalid email/username or password." });
+      // Same message whether the account doesn't exist or the password is
+      // wrong — don't let the response leak which emails/usernames are real.
+      const invalidCredsResponse = () =>
+        res.status(401).json({ message: "Invalid email/username or password." });
+
+      if (!user) return invalidCredsResponse();
+
+      if (user.authProvider === "google" && !user.passwordHash) {
+        return res.status(400).json({
+          message: "This account signs in with Google. Use the \"Continue with Google\" button.",
+        });
+      }
+
+      if (user.lockedUntil && user.lockedUntil > new Date()) {
+        const minutesLeft = Math.ceil((user.lockedUntil - new Date()) / 60000);
+        return res.status(429).json({
+          message: `Too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+        });
+      }
 
       const valid = await bcrypt.compare(password, user.passwordHash);
-      if (!valid) return res.status(401).json({ message: "Invalid email/username or password." });
+      if (!valid) {
+        const attempts = user.failedLoginAttempts + 1;
+        const lockingNow = attempts >= MAX_FAILED_LOGIN_ATTEMPTS;
+        await user.update({
+          failedLoginAttempts: lockingNow ? 0 : attempts,
+          lockedUntil: lockingNow ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null,
+        });
+        return invalidCredsResponse();
+      }
+
+      if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+        await user.update({ failedLoginAttempts: 0, lockedUntil: null });
+      }
 
       if (user.status === "pending_approval") {
         return res.status(403).json({
@@ -262,6 +319,7 @@ router.post(
 // ---------- Forgot / Reset password ----------
 router.post(
   "/forgot-password",
+  registerLimiter,
   body("email").isEmail().withMessage("Please enter a valid email address."),
   checkValidation,
   async (req, res, next) => {
@@ -295,8 +353,9 @@ router.post(
 
 router.post(
   "/reset-password",
+  registerLimiter,
   body("token").notEmpty().withMessage("Reset token is required."),
-  body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 characters."),
+  strongPasswordValidator,
   body("confirmPassword").custom((value, { req }) => {
     if (value !== req.body.password) throw new Error("Passwords do not match.");
     return true;
@@ -311,6 +370,9 @@ router.post(
 
       const user = await User.findByPk(record.userId);
       user.passwordHash = await bcrypt.hash(req.body.password, 12);
+      user.authProvider = "local";
+      user.failedLoginAttempts = 0;
+      user.lockedUntil = null;
       await user.save();
 
       record.used = true;
@@ -322,6 +384,107 @@ router.post(
     }
   }
 );
+
+// ---------- Google Sign-In (login or registration, same flow) ----------
+router.post(
+  "/google",
+  loginLimiter,
+  body("credential").notEmpty().withMessage("Missing Google credential."),
+  checkValidation,
+  async (req, res, next) => {
+    if (!googleClient) {
+      return res.status(503).json({
+        message: "Google Sign-In is not configured on this server yet.",
+      });
+    }
+
+    try {
+      let payload;
+      try {
+        const ticket = await googleClient.verifyIdToken({
+          idToken: req.body.credential,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } catch {
+        return res.status(401).json({ message: "Invalid Google credential." });
+      }
+
+      if (!payload.email_verified) {
+        return res.status(403).json({ message: "Your Google email address isn't verified." });
+      }
+
+      let user = await User.findOne({ where: { googleId: payload.sub } });
+
+      if (!user) {
+        // Email already registered locally (or via a different flow) — link
+        // this Google identity to it instead of creating a duplicate account.
+        // Google having verified the email address is what makes this safe.
+        user = await User.findOne({ where: { email: payload.email } });
+        if (user) {
+          if (!user.googleId) await user.update({ googleId: payload.sub });
+        } else {
+          const t = await sequelize.transaction();
+          try {
+            const username = await uniqueUsernameFromEmail(payload.email);
+            user = await User.create(
+              {
+                role: "customer",
+                status: "active",
+                firstName: payload.given_name || "New",
+                lastName: payload.family_name || "User",
+                username,
+                email: payload.email,
+                passwordHash: null,
+                authProvider: "google",
+                googleId: payload.sub,
+                profileImage: payload.picture || null,
+              },
+              { transaction: t }
+            );
+            await CustomerProfile.create({ userId: user.id }, { transaction: t });
+            await t.commit();
+          } catch (err) {
+            await t.rollback();
+            throw err;
+          }
+        }
+      }
+
+      if (user.status === "suspended") {
+        return res.status(403).json({ message: "This account has been suspended." });
+      }
+      if (user.status === "pending_approval") {
+        return res.status(403).json({
+          message: "Your artist application is still pending admin approval.",
+        });
+      }
+      if (user.status === "rejected") {
+        return res.status(403).json({
+          message: `Your artist application was not approved. Reason: ${
+            user.rejectionReason || "No reason provided."
+          }`,
+        });
+      }
+
+      const token = signToken(user);
+      res.json({ token, user: sanitizeUser(user) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+async function uniqueUsernameFromEmail(email) {
+  const base = email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "").slice(0, 20) || "user";
+  let candidate = base;
+  let suffix = 0;
+  while (await User.findOne({ where: { username: candidate } })) {
+    suffix += 1;
+    candidate = `${base}${suffix}`;
+  }
+  return candidate;
+}
 
 router.get("/me", requireAuth, (req, res) => {
   res.json({ user: sanitizeUser(req.user) });

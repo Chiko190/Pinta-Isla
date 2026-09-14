@@ -90,6 +90,7 @@ export default function ArtistProfile() {
               <Row label="Medium" value={artist.medium} />
               <Row label="Experience" value={artist.yearsExperience ? `${artist.yearsExperience} years` : "—"} />
             </div>
+            <SocialLinks links={artist.socialLinks} />
           </div>
 
           <div className="md:col-span-2">
@@ -168,6 +169,42 @@ function Row({ label, value }) {
     <div className="flex justify-between border-b border-ink-950/5 py-1.5 last:border-0">
       <span className="text-ink-950/45">{label}</span>
       <span className="font-medium text-ink-950">{value}</span>
+    </div>
+  );
+}
+
+const SOCIAL_PLATFORMS = [
+  { key: "instagram", label: "Instagram" },
+  { key: "facebook", label: "Facebook" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "website", label: "Website" },
+];
+
+function normalizeUrl(value) {
+  if (!value) return null;
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function SocialLinks({ links }) {
+  const active = SOCIAL_PLATFORMS.filter((p) => links?.[p.key]);
+  if (!active.length) return null;
+
+  return (
+    <div className="rounded-2xl border border-ink-950/8 bg-white p-5">
+      <h4 className="font-display text-sm font-semibold text-ink-950">Find on social</h4>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {active.map((p) => (
+          <a
+            key={p.key}
+            href={normalizeUrl(links[p.key])}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full border border-ink-950/10 px-3 py-1.5 text-xs font-medium text-ink-700 hover:border-ink-700 hover:bg-ink-700/5"
+          >
+            {p.label}
+          </a>
+        ))}
+      </div>
     </div>
   );
 }

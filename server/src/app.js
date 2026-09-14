@@ -29,6 +29,12 @@ const servingClientBuild = fs.existsSync(clientDistPath);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    // Helmet's default COOP ("same-origin") isolates this tab from any popup
+    // it opens, which breaks Google Sign-In: after picking an account, the
+    // popup can't hand the result back to us and just hangs on a blank page.
+    // "same-origin-allow-popups" keeps the isolation for everything else but
+    // lets popups we open (Google's) communicate back.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
     // Helmet's default CSP is script-src 'self', which silently blocks the
     // Google Identity Services script and its sign-in iframe/popup. Widen

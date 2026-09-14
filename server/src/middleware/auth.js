@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { User } = require("../models");
+const { User, ArtistProfile } = require("../models");
 
 function signToken(user) {
   return jwt.sign(
@@ -38,4 +38,21 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { signToken, requireAuth, requireRole };
+// Gates the artist dashboard/routes for anyone with an approved seller
+// application — a dedicated artist account (role === "artist", which can
+// only log in once User.status is "active" anyway) or a customer account
+// that separately applied to sell. role === "customer" is unaffected either
+// way, so a dual-role user keeps full customer access regardless of their
+// seller application's status.
+async function requireApprovedArtist(req, res, next) {
+  if (!req.user) return res.status(403).json({ message: "You don't have permission to do that." });
+  if (req.user.role === "artist") return next();
+
+  const profile = await ArtistProfile.findOne({ where: { userId: req.user.id } });
+  if (profile && profile.status === "approved") {
+    return next();
+  }
+  return res.status(403).json({ message: "You don't have permission to do that." });
+}
+
+module.exports = { signToken, requireAuth, requireRole, requireApprovedArtist };

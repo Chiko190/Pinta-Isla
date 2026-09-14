@@ -168,6 +168,7 @@ async function seed() {
           location: a.location,
           coverImage: `/uploads/${a.cover}`,
           verified: i < 2, // first two are verified, for a realistic mix
+          status: "approved",
           socialLinks: { instagram: `https://instagram.com/${a.username}` },
         },
         { transaction: t }

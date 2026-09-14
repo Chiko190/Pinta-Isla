@@ -12,6 +12,7 @@ const NAV = [
   { to: "/customer/wishlist", label: "Wishlist" },
   { to: "/customer/following", label: "Following" },
   { to: "/orders", label: "Orders" },
+  { to: "/customer/become-seller", label: "Become a Seller" },
   { to: "/customer/profile", label: "Profile Settings" },
 ];
 

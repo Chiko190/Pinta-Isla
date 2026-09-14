@@ -157,14 +157,16 @@ router.get("/artworks/:id", async (req, res, next) => {
 router.get("/artists", async (req, res, next) => {
   try {
     const { q } = req.query;
-    const userWhere = { role: "artist", status: "active" };
+
+    const where = { status: "approved" };
+    if (q) where.artistName = { [Op.like]: `%${q}%` };
 
     const artists = await ArtistProfile.findAll({
       include: [
-        { model: User, where: userWhere, attributes: ["id", "profileImage", "status"] },
+        { model: User, where: { status: "active" }, attributes: ["id", "profileImage", "status"] },
         { model: Artwork, attributes: ["id"], where: { status: "available" }, required: false },
       ],
-      where: q ? { artistName: { [Op.like]: `%${q}%` } } : undefined,
+      where,
       order: [["createdAt", "DESC"]],
     });
 
@@ -189,8 +191,9 @@ router.get("/artists", async (req, res, next) => {
 router.get("/artists/featured", async (req, res, next) => {
   try {
     const artists = await ArtistProfile.findAll({
+      where: { status: "approved" },
       include: [
-        { model: User, where: { role: "artist", status: "active" }, attributes: ["profileImage"] },
+        { model: User, where: { status: "active" }, attributes: ["profileImage"] },
         { model: Artwork, attributes: ["id"], where: { status: "available" }, required: false },
       ],
       limit: 8,
@@ -217,7 +220,7 @@ router.get("/artists/featured", async (req, res, next) => {
 router.get("/artists/:id", async (req, res, next) => {
   try {
     const artist = await ArtistProfile.findOne({
-      where: { id: req.params.id },
+      where: { id: req.params.id, status: "approved" },
       include: [
         { model: User, where: { status: "active" }, attributes: ["profileImage", "createdAt"] },
         { model: PortfolioItem },

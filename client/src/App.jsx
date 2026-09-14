@@ -30,6 +30,7 @@ import CustomerDashboard from "./pages/customer/Dashboard";
 import CustomerWishlist from "./pages/customer/Wishlist";
 import CustomerFollowing from "./pages/customer/Following";
 import CustomerProfileSettings from "./pages/customer/ProfileSettings";
+import BecomeSeller from "./pages/customer/BecomeSeller";
 
 import ArtistDashboard from "./pages/artist/Dashboard";
 import MyArtworks from "./pages/artist/MyArtworks";
@@ -97,6 +98,7 @@ export default function App() {
               <Route path="/customer/dashboard" element={<CustomerDashboard />} />
               <Route path="/customer/wishlist" element={<CustomerWishlist />} />
               <Route path="/customer/following" element={<CustomerFollowing />} />
+              <Route path="/customer/become-seller" element={<BecomeSeller />} />
               <Route path="/customer/profile" element={<CustomerProfileSettings />} />
             </Route>
 

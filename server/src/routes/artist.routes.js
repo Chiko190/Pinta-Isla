@@ -9,13 +9,13 @@ const {
   Follow,
   Category,
 } = require("../models");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth, requireApprovedArtist } = require("../middleware/auth");
 const { checkValidation } = require("../middleware/errorHandler");
 const upload = require("../middleware/upload");
 const { nextDisplayId } = require("../utils/displayId");
 
 const router = express.Router();
-router.use(requireAuth, requireRole("artist"));
+router.use(requireAuth, requireApprovedArtist);
 
 async function getOwnProfile(userId) {
   const profile = await ArtistProfile.findOne({ where: { userId } });

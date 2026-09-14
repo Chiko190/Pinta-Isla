@@ -11,6 +11,7 @@ const NAV = [
   { to: "/customer/wishlist", label: "Wishlist" },
   { to: "/customer/following", label: "Following" },
   { to: "/orders", label: "Orders" },
+  { to: "/customer/become-seller", label: "Become a Seller" },
   { to: "/customer/profile", label: "Profile Settings" },
 ];
 
@@ -35,6 +36,7 @@ export default function CustomerDashboard() {
         <Button as={Link} to="/artworks">Browse Artworks</Button>
         <Button as={Link} to="/artists" variant="outline">Meet Artists</Button>
         <Button as={Link} to="/commissions" variant="outline">Request Commission</Button>
+        <Button as={Link} to="/customer/become-seller" variant="outline">Become a Seller</Button>
       </div>
     </DashboardLayout>
   );

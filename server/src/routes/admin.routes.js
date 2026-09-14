@@ -30,8 +30,8 @@ router.get("/stats", async (req, res, next) => {
       totalCategories,
     ] = await Promise.all([
       User.count(),
-      User.count({ where: { role: "artist" } }),
-      User.count({ where: { role: "artist", status: "pending_approval" } }),
+      ArtistProfile.count({ where: { status: "approved" } }),
+      ArtistProfile.count({ where: { status: "pending_approval" } }),
       Artwork.count(),
       Artwork.count({ where: { status: "pending_review" } }),
       Category.count(),
@@ -57,16 +57,22 @@ router.get("/stats", async (req, res, next) => {
 });
 
 // ---------- Artist applications ----------
+// ArtistProfile.status is the canonical state here — it covers both a
+// dedicated artist account (User.role === "artist") and a customer account
+// that separately applied to sell, so this list and the approve/reject
+// actions below work the same for either.
 router.get("/artist-applications", async (req, res, next) => {
   try {
     const { status = "pending_approval" } = req.query;
-    const users = await User.findAll({
-      where: { role: "artist", status },
-      attributes: { exclude: ["passwordHash"] },
-      include: [{ model: ArtistProfile, include: [PortfolioItem] }],
+    const applications = await ArtistProfile.findAll({
+      where: { status },
+      include: [
+        { model: User, attributes: { exclude: ["passwordHash"] } },
+        PortfolioItem,
+      ],
       order: [["createdAt", "DESC"]],
     });
-    res.json({ applications: users });
+    res.json({ applications });
   } catch (err) {
     next(err);
   }
@@ -74,12 +80,21 @@ router.get("/artist-applications", async (req, res, next) => {
 
 router.post("/artist-applications/:userId/approve", async (req, res, next) => {
   try {
-    const user = await User.findOne({ where: { id: req.params.userId, role: "artist" } });
-    if (!user) return res.status(404).json({ message: "Application not found." });
+    const profile = await ArtistProfile.findOne({ where: { userId: req.params.userId } });
+    if (!profile) return res.status(404).json({ message: "Application not found." });
 
-    user.status = "active";
-    user.rejectionReason = null;
-    await user.save();
+    profile.status = "approved";
+    profile.rejectionReason = null;
+    await profile.save();
+
+    // A dedicated artist account (not a dual-role customer) is also gated
+    // from logging in at all until this flips — keep that in sync.
+    const user = await User.findByPk(req.params.userId);
+    if (user.role === "artist" && user.status === "pending_approval") {
+      user.status = "active";
+      user.rejectionReason = null;
+      await user.save();
+    }
 
     await logAdminAction({
       adminUserId: req.user.id,
@@ -102,12 +117,21 @@ router.post(
   checkValidation,
   async (req, res, next) => {
     try {
-      const user = await User.findOne({ where: { id: req.params.userId, role: "artist" } });
-      if (!user) return res.status(404).json({ message: "Application not found." });
+      const profile = await ArtistProfile.findOne({ where: { userId: req.params.userId } });
+      if (!profile) return res.status(404).json({ message: "Application not found." });
 
-      user.status = "rejected";
-      user.rejectionReason = req.body.reason;
-      await user.save();
+      profile.status = "rejected";
+      profile.rejectionReason = req.body.reason;
+      await profile.save();
+
+      const user = await User.findByPk(req.params.userId);
+      // Only a dedicated artist account's login is gated by this — a
+      // dual-role customer keeps shopping normally after a rejection.
+      if (user.role === "artist" && user.status === "pending_approval") {
+        user.status = "rejected";
+        user.rejectionReason = req.body.reason;
+        await user.save();
+      }
 
       await logAdminAction({
         adminUserId: req.user.id,

@@ -6,3 +6,6 @@ export const toggleWishlist = (artworkId) => client.post(`/customer/wishlist/${a
 export const getFollowing = () => client.get("/customer/following");
 export const toggleFollow = (artistId) => client.post(`/customer/follow/${artistId}`);
 export const updateCustomerProfile = (formData) => client.put("/customer/profile", formData);
+
+export const getSellerApplication = () => client.get("/customer/seller-application");
+export const submitSellerApplication = (formData) => client.post("/customer/seller-application", formData);

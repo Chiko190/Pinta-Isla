@@ -31,6 +31,16 @@ const ArtistProfile = sequelize.define("ArtistProfile", {
   },
   verified: { type: DataTypes.BOOLEAN, defaultValue: false },
   rejectionReason: { type: DataTypes.TEXT },
+  // The single source of truth for "can this account act as an artist" —
+  // independent of User.role, so a customer account can hold a pending or
+  // rejected seller application without losing customer access, and a
+  // dedicated artist account (User.role === "artist") still uses this same
+  // field once approved (kept in sync with User.status by admin actions).
+  status: {
+    type: DataTypes.ENUM("pending_approval", "approved", "rejected"),
+    allowNull: false,
+    defaultValue: "pending_approval",
+  },
 });
 
 module.exports = ArtistProfile;

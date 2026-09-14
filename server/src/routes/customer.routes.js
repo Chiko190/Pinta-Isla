@@ -1,16 +1,22 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const { body } = require("express-validator");
 const {
+  sequelize,
   Wishlist,
   Follow,
   Artwork,
   ArtworkImage,
   ArtistProfile,
+  PortfolioItem,
   User,
   CustomerProfile,
 } = require("../models");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { checkValidation } = require("../middleware/errorHandler");
 const upload = require("../middleware/upload");
+const { nextDisplayId } = require("../utils/displayId");
+const { notifyAdmins } = require("../utils/notify");
 
 const router = express.Router();
 router.use(requireAuth, requireRole("customer"));
@@ -146,5 +152,144 @@ router.put("/profile", upload.single("profileImage"), async (req, res, next) => 
     next(err);
   }
 });
+
+// ---------- Become a seller (customer applies for an artist profile on the
+// same account — role stays "customer", full customer access unaffected
+// regardless of the application's outcome) ----------
+router.get("/seller-application", async (req, res, next) => {
+  try {
+    const profile = await ArtistProfile.findOne({ where: { userId: req.user.id } });
+    res.json({ application: profile });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  "/seller-application",
+  upload.array("portfolioImages", 8),
+  body("artistName").trim().notEmpty().withMessage("Artist name is required."),
+  body("agreeArtistTerms")
+    .custom((v) => v === "true" || v === true)
+    .withMessage("You must agree to the Marketplace Terms, Artist Guidelines, and Copyright Policy."),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const existing = await ArtistProfile.findOne({ where: { userId: req.user.id } });
+      if (existing && existing.status !== "rejected") {
+        return res.status(409).json({
+          message:
+            existing.status === "pending_approval"
+              ? "You already have a seller application pending review."
+              : "You're already an approved seller.",
+        });
+      }
+
+      const {
+        artistName,
+        bio,
+        statement,
+        specialization,
+        style,
+        medium,
+        yearsExperience,
+        intro,
+        location,
+        socialLinks,
+        portfolioMeta,
+      } = req.body;
+
+      let parsedSocialLinks = {};
+      try {
+        parsedSocialLinks = socialLinks ? JSON.parse(socialLinks) : {};
+      } catch {
+        parsedSocialLinks = {};
+      }
+
+      const t = await sequelize.transaction();
+      try {
+        let profile = existing;
+        if (profile) {
+          // Re-applying after a rejection — overwrite with the fresh submission.
+          Object.assign(profile, {
+            artistName,
+            bio,
+            statement,
+            specialization,
+            style,
+            medium,
+            yearsExperience: yearsExperience ? parseInt(yearsExperience, 10) : null,
+            intro,
+            location,
+            socialLinks: parsedSocialLinks,
+            status: "pending_approval",
+            rejectionReason: null,
+          });
+          await profile.save({ transaction: t });
+        } else {
+          const displayId = await nextDisplayId(ArtistProfile, "ARTIST", t);
+          profile = await ArtistProfile.create(
+            {
+              userId: req.user.id,
+              displayId,
+              artistName,
+              bio,
+              statement,
+              specialization,
+              style,
+              medium,
+              yearsExperience: yearsExperience ? parseInt(yearsExperience, 10) : null,
+              intro,
+              location,
+              socialLinks: parsedSocialLinks,
+              status: "pending_approval",
+            },
+            { transaction: t }
+          );
+        }
+
+        let parsedPortfolioMeta = [];
+        try {
+          parsedPortfolioMeta = portfolioMeta ? JSON.parse(portfolioMeta) : [];
+        } catch {
+          parsedPortfolioMeta = [];
+        }
+
+        const portfolioFiles = req.files || [];
+        if (portfolioFiles.length) {
+          await PortfolioItem.bulkCreate(
+            portfolioFiles.map((file, i) => ({
+              artistProfileId: profile.id,
+              image: upload.fileUrl(file),
+              title: parsedPortfolioMeta[i]?.title || "",
+              description: parsedPortfolioMeta[i]?.description || "",
+              medium: parsedPortfolioMeta[i]?.medium || "",
+              year: parsedPortfolioMeta[i]?.year ? parseInt(parsedPortfolioMeta[i].year, 10) : null,
+            })),
+            { transaction: t }
+          );
+        }
+
+        await t.commit();
+
+        await notifyAdmins(
+          "artist_application",
+          `${req.user.firstName} ${req.user.lastName} (@${req.user.username}) applied to become a seller.`,
+          "/admin/artist-applications"
+        );
+
+        res.status(201).json({
+          application: profile,
+          message: "Your seller application has been submitted. An administrator will review it.",
+        });
+      } catch (err) {
+        await t.rollback();
+        throw err;
+      }
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 module.exports = router;

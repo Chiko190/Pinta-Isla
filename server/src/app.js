@@ -30,6 +30,20 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    // Helmet's default CSP is script-src 'self', which silently blocks the
+    // Google Identity Services script and its sign-in iframe/popup. Widen
+    // only what Google Sign-In actually needs, everything else stays locked
+    // to 'self'.
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://accounts.google.com", "https://apis.google.com"],
+        frameSrc: ["'self'", "https://accounts.google.com"],
+        connectSrc: ["'self'", "https://accounts.google.com"],
+        styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https://*.googleusercontent.com"],
+      },
+    },
   })
 );
 if (!servingClientBuild) {

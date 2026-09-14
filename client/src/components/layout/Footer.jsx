@@ -14,7 +14,7 @@ export default function Footer() {
           </p>
         </div>
         <FooterCol title="Marketplace" links={[["Artworks", "/artworks"], ["Artists", "/artists"], ["Categories", "/categories"], ["Commissions", "/commissions"]]} />
-        <FooterCol title="Company" links={[["About", "/about"], ["Contact", "/contact"]]} />
+        <FooterCol title="Company" links={[["About", "/about"], ["Contact", "/contact"], ["Privacy Policy", "/privacy"], ["Terms of Service", "/terms"]]} />
         <FooterCol title="Account" links={[["Log in", "/login"], ["Register", "/register"]]} />
       </div>
       <div className="mx-auto mt-10 max-w-7xl border-t border-white/10 px-4 pt-6 text-xs text-ink-100/40 sm:px-6">

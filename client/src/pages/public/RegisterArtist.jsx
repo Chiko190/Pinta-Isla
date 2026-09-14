@@ -199,10 +199,10 @@ export default function RegisterArtist() {
             <p className="text-sm text-ink-950/70">Please confirm you agree to the following before submitting your application:</p>
             <label className="flex items-start gap-2.5 text-sm text-ink-950/70">
               <input type="checkbox" checked={agreeAll} onChange={(e) => setAgreeAll(e.target.checked)} className="mt-0.5 accent-ink-700" />
-              I agree to the <span className="font-medium text-ink-700">Marketplace Terms</span>,{" "}
+              I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-ink-700 hover:underline">Marketplace Terms</a>,{" "}
               <span className="font-medium text-ink-700">Artist Guidelines</span>,{" "}
               <span className="font-medium text-ink-700">Copyright Policy</span>, and{" "}
-              <span className="font-medium text-ink-700">Privacy Policy</span>.
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-ink-700 hover:underline">Privacy Policy</a>.
             </label>
           </div>
         )}

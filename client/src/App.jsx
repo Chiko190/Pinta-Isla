@@ -20,6 +20,8 @@ import ForgotPassword from "./pages/public/ForgotPassword";
 import ResetPassword from "./pages/public/ResetPassword";
 import About from "./pages/public/About";
 import Contact from "./pages/public/Contact";
+import Privacy from "./pages/public/Privacy";
+import Terms from "./pages/public/Terms";
 import Notifications from "./pages/public/Notifications";
 import ComingSoonPage from "./pages/public/ComingSoonPage";
 import NotFound from "./pages/public/NotFound";
@@ -57,6 +59,8 @@ export default function App() {
             <Route path="/categories" element={<Categories />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
 
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<RegisterChoice />} />

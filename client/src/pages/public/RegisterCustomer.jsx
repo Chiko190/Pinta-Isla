@@ -117,8 +117,8 @@ export default function RegisterCustomer() {
         <label className="flex items-start gap-2.5 text-sm text-ink-950/70">
           <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 accent-ink-700" required />
           By creating an account, you agree to our{" "}
-          <span className="font-medium text-ink-700">Terms of Service</span> and{" "}
-          <span className="font-medium text-ink-700">Privacy Policy</span>.
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-ink-700 hover:underline">Terms of Service</a> and{" "}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-ink-700 hover:underline">Privacy Policy</a>.
         </label>
 
         {error && <p className="rounded-lg bg-accent-red/10 px-4 py-2.5 text-sm text-accent-red">{error}</p>}
